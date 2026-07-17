@@ -1,0 +1,270 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>MNP — Bookkeeper Assessment</title>
+  <style>
+    body { font-family: Arial, sans-serif; max-width: 480px; margin: 40px auto; color: #333; padding: 0 16px; }
+    h1 { font-size: 20px; margin-bottom: 4px; }
+    .muted { color: #777; font-size: 13px; }
+    input { width: 100%; box-sizing: border-box; padding: 10px; margin: 6px 0; border: 1px solid #ccc; border-radius: 6px; font-size: 14px; }
+    button { width: 100%; padding: 11px; margin-top: 8px; border: none; border-radius: 6px; background: #FFA629; color: #fff; font-size: 14px; font-weight: bold; cursor: pointer; }
+    button:disabled { background: #ddd; color: #999; cursor: not-allowed; }
+    button.secondary { background: #eee; color: #444; }
+    .card { border: 1px solid #e2e2e2; border-radius: 10px; padding: 14px; margin: 10px 0; }
+    .card.done { opacity: 0.55; }
+    .badge { display: inline-block; font-size: 11px; padding: 2px 8px; border-radius: 10px; background: #FFE1B8; color: #a05a00; font-weight: bold; }
+    .badge.done { background: #e2e2e2; color: #777; }
+    #stage { position: relative; background: #000; border-radius: 10px; overflow: hidden; aspect-ratio: 16/10; }
+    #canvasPreview { width: 100%; height: 100%; object-fit: contain; }
+    #recDot { display:none; position:absolute; top:8px; left:8px; width:9px; height:9px; border-radius:50%; background:#e03131; }
+    #timer { display:none; position:absolute; top:6px; right:8px; color:#fff; font-size:12px; font-family:monospace; }
+    .row { display: flex; gap: 8px; }
+    .hidden { display: none; }
+  </style>
+</head>
+<body>
+
+  <h1>MNP — Bookkeeper assessment</h1>
+  <p class="muted" id="subtitle">Register to start.</p>
+
+  <!-- STEP 1: Register -->
+  <div id="stepRegister">
+    <input id="name" type="text" placeholder="Full name" />
+    <input id="email" type="email" placeholder="name@email.com" />
+    <button id="btnRegister">Continue</button>
+  </div>
+
+  <!-- STEP 2: Question list -->
+  <div id="stepQuestions" class="hidden"></div>
+
+  <!-- STEP 3: Recording -->
+  <div id="stepRecord" class="hidden">
+    <p class="muted" id="qInstructions"></p>
+    <div id="stage">
+      <video id="canvasPreview" autoplay muted playsinline></video>
+      <span id="recDot"></span>
+      <span id="timer">00:00</span>
+    </div>
+    <div class="row">
+      <button id="btnStart">Start recording</button>
+      <button id="btnStop" class="secondary" disabled>Stop</button>
+    </div>
+    <button id="btnSubmit" disabled>Submit this recording</button>
+    <button id="btnCancel" class="secondary">Back to questions</button>
+  </div>
+
+  <!-- STEP 4: Done -->
+  <div id="stepDone" class="hidden">
+    <p>All questions submitted. Thank you!</p>
+  </div>
+
+<script>
+// ============================================================
+// FILL THIS IN after you deploy the Apps Script backend:
+// Deploy → Manage deployments → copy the "Web app" URL.
+// ============================================================
+const WEB_APP_URL = 'https://script.google.com/macros/s/AKfycbxzlVq5RY4g2I3d7MlkikEYOwirNrWarzi1C__HiTTy2Z4204D5RypqEwIR4tOTfz8/exec';
+
+let candidateName = '';
+let candidateEmail = '';
+let currentQuestion = null;
+let questions = [];
+
+let screenStream, camStream, mixedStream, recorder, chunks = [];
+let drawLoop, timerInt, seconds = 0;
+
+function apiGet(params) {
+  const qs = new URLSearchParams(params).toString();
+  return fetch(WEB_APP_URL + '?' + qs).then(r => r.json());
+}
+
+// IMPORTANT: no custom headers here — a default content-type keeps this a
+// "simple request" so the browser skips CORS preflight (Apps Script can't
+// answer preflight OPTIONS requests).
+function apiPost(payload) {
+  return fetch(WEB_APP_URL, { method: 'POST', body: JSON.stringify(payload) }).then(r => r.json());
+}
+
+function showStep(id) {
+  ['stepRegister','stepQuestions','stepRecord','stepDone'].forEach(s => {
+    document.getElementById(s).classList.toggle('hidden', s !== id);
+  });
+}
+
+// ---- Step 1: Register ----
+document.getElementById('btnRegister').onclick = () => {
+  candidateName = document.getElementById('name').value.trim();
+  candidateEmail = document.getElementById('email').value.trim();
+  if (!candidateName || !candidateEmail) { alert('Please fill in both fields.'); return; }
+  document.getElementById('subtitle').textContent = 'Loading your questions...';
+
+  const stuckTimer = setTimeout(() => {
+    alert('This is taking too long. Check that WEB_APP_URL is set correctly and the Apps Script backend is deployed.');
+  }, 8000);
+
+  apiGet({ action: 'questions' })
+    .then(res => {
+      questions = res.questions;
+      return apiGet({ action: 'status', email: candidateEmail });
+    })
+    .then(res => { clearTimeout(stuckTimer); renderQuestionList(res.status); })
+    .catch(err => { clearTimeout(stuckTimer); onLoadError(err); });
+};
+
+function onLoadError(err) {
+  document.getElementById('subtitle').textContent = 'Something went wrong.';
+  alert('Could not load questions.\n\nDetails: ' + (err && err.message ? err.message : err));
+}
+
+// ---- Step 2: Question list ----
+function renderQuestionList(status) {
+  document.getElementById('subtitle').textContent = 'Hi ' + candidateName + ' — 1 attempt per question.';
+  const box = document.getElementById('stepQuestions');
+  box.innerHTML = '';
+  questions.forEach(q => {
+    const done = status[q.id] === 'submitted';
+    const div = document.createElement('div');
+    div.className = 'card' + (done ? ' done' : '');
+    div.innerHTML =
+      '<span class="badge' + (done ? ' done' : '') + '">' + (done ? 'Submitted' : 'Available') + '</span>' +
+      '<p style="font-weight:bold;margin:8px 0 4px;">' + q.title + '</p>' +
+      '<p class="muted" style="margin:0 0 8px;">' + q.instructions + '</p>';
+    if (!done) {
+      const btn = document.createElement('button');
+      btn.textContent = 'Start question';
+      btn.onclick = () => startQuestion(q);
+      div.appendChild(btn);
+    }
+    box.appendChild(div);
+  });
+  const allDone = questions.every(q => status[q.id] === 'submitted');
+  showStep(allDone ? 'stepDone' : 'stepQuestions');
+}
+
+// ---- Step 3: Recording ----
+function startQuestion(q) {
+  currentQuestion = q;
+  document.getElementById('qInstructions').textContent = q.title + ' — ' + q.instructions;
+  document.getElementById('btnSubmit').disabled = true;
+  document.getElementById('btnStart').disabled = false;
+  document.getElementById('btnStop').disabled = true;
+  showStep('stepRecord');
+}
+
+document.getElementById('btnCancel').onclick = () => {
+  stopAllTracks();
+  apiGet({ action: 'status', email: candidateEmail }).then(res => renderQuestionList(res.status));
+};
+
+document.getElementById('btnStart').onclick = async () => {
+  try {
+    screenStream = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: false });
+    camStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+  } catch (err) {
+    alert('Screen and camera access are required to record: ' + err.message);
+    return;
+  }
+
+  const canvas = document.createElement('canvas');
+  canvas.width = 1280; canvas.height = 800;
+  const ctx = canvas.getContext('2d');
+  const screenVideo = document.createElement('video');
+  screenVideo.srcObject = screenStream; screenVideo.muted = true; screenVideo.play();
+  const camVideo = document.createElement('video');
+  camVideo.srcObject = camStream; camVideo.muted = true; camVideo.play();
+
+  const previewEl = document.getElementById('canvasPreview');
+
+  function draw() {
+    ctx.drawImage(screenVideo, 0, 0, canvas.width, canvas.height);
+    const camW = 240, camH = 180, pad = 16;
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(canvas.width - camW - pad, canvas.height - camH - pad, camW, camH);
+    ctx.clip();
+    ctx.drawImage(camVideo, canvas.width - camW - pad, canvas.height - camH - pad, camW, camH);
+    ctx.restore();
+    ctx.strokeStyle = '#FFA629';
+    ctx.lineWidth = 3;
+    ctx.strokeRect(canvas.width - camW - pad, canvas.height - camH - pad, camW, camH);
+    drawLoop = requestAnimationFrame(draw);
+  }
+  draw();
+
+  mixedStream = canvas.captureStream(30);
+  camStream.getAudioTracks().forEach(t => mixedStream.addTrack(t));
+  previewEl.srcObject = mixedStream;
+
+  chunks = [];
+  const mime = MediaRecorder.isTypeSupported('video/webm;codecs=vp9,opus') ? 'video/webm;codecs=vp9,opus' : 'video/webm';
+  recorder = new MediaRecorder(mixedStream, { mimeType: mime });
+  recorder.ondataavailable = e => { if (e.data.size > 0) chunks.push(e.data); };
+  recorder.start();
+
+  document.getElementById('recDot').style.display = 'block';
+  document.getElementById('timer').style.display = 'block';
+  document.getElementById('btnStart').disabled = true;
+  document.getElementById('btnStop').disabled = false;
+  seconds = 0;
+  timerInt = setInterval(() => {
+    seconds++;
+    const m = String(Math.floor(seconds/60)).padStart(2,'0');
+    const s = String(seconds%60).padStart(2,'0');
+    document.getElementById('timer').textContent = m + ':' + s;
+  }, 1000);
+
+  screenStream.getVideoTracks()[0].onended = () => document.getElementById('btnStop').click();
+};
+
+document.getElementById('btnStop').onclick = () => {
+  if (recorder && recorder.state !== 'inactive') recorder.stop();
+  cancelAnimationFrame(drawLoop);
+  clearInterval(timerInt);
+  document.getElementById('recDot').style.display = 'none';
+  document.getElementById('btnStop').disabled = true;
+  document.getElementById('btnSubmit').disabled = false;
+  stopAllTracks();
+};
+
+function stopAllTracks() {
+  [screenStream, camStream].forEach(s => { if (s) s.getTracks().forEach(t => t.stop()); });
+}
+
+document.getElementById('btnSubmit').onclick = () => {
+  document.getElementById('btnSubmit').disabled = true;
+  document.getElementById('btnSubmit').textContent = 'Uploading...';
+  setTimeout(() => {
+    const blob = new Blob(chunks, { type: 'video/webm' });
+    const reader = new FileReader();
+    reader.onload = () => {
+      const base64 = reader.result.split(',')[1];
+      apiPost({
+        name: candidateName,
+        email: candidateEmail,
+        questionId: currentQuestion.id,
+        mimeType: 'video/webm',
+        videoBase64: base64
+      })
+      .then(onSubmitDone)
+      .catch(onSubmitError);
+    };
+    reader.readAsDataURL(blob);
+  }, 200);
+};
+
+function onSubmitDone(res) {
+  document.getElementById('btnSubmit').textContent = 'Submit this recording';
+  if (!res.ok) { alert('Could not submit: ' + res.error); document.getElementById('btnSubmit').disabled = false; return; }
+  apiGet({ action: 'status', email: candidateEmail }).then(r => renderQuestionList(r.status));
+}
+
+function onSubmitError(err) {
+  document.getElementById('btnSubmit').textContent = 'Submit this recording';
+  document.getElementById('btnSubmit').disabled = false;
+  alert('Upload failed: ' + (err && err.message ? err.message : err));
+}
+</script>
+</body>
+</html>
