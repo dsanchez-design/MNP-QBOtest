@@ -65,12 +65,13 @@
 // FILL THIS IN after you deploy the Apps Script backend:
 // Deploy → Manage deployments → copy the "Web app" URL.
 // ============================================================
-const WEB_APP_URL = 'https://script.google.com/macros/s/AKfycbxzlVq5RY4g2I3d7MlkikEYOwirNrWarzi1C__HiTTy2Z4204D5RypqEwIR4tOTfz8/exec';
+const WEB_APP_URL = 'PASTE_YOUR_APPS_SCRIPT_WEB_APP_URL_HERE';
 
 let candidateName = '';
 let candidateEmail = '';
 let currentQuestion = null;
 let questions = [];
+let sandboxUrl = '';
 
 let screenStream, camStream, mixedStream, recorder, chunks = [];
 let drawLoop, timerInt, seconds = 0;
@@ -107,6 +108,7 @@ document.getElementById('btnRegister').onclick = () => {
   apiGet({ action: 'questions' })
     .then(res => {
       questions = res.questions;
+      sandboxUrl = res.sandboxUrl;
       return apiGet({ action: 'status', email: candidateEmail });
     })
     .then(res => { clearTimeout(stuckTimer); renderQuestionList(res.status); })
@@ -123,6 +125,16 @@ function renderQuestionList(status) {
   document.getElementById('subtitle').textContent = 'Hi ' + candidateName + ' — 1 attempt per question.';
   const box = document.getElementById('stepQuestions');
   box.innerHTML = '';
+
+  const banner = document.createElement('div');
+  banner.className = 'card';
+  banner.style.background = '#FFE1B8';
+  banner.innerHTML =
+    '<p style="font-weight:bold;margin:0 0 6px;">Your sandbox</p>' +
+    '<p class="muted" style="margin:0 0 8px;">Open this in a separate tab before you start recording each question.</p>' +
+    '<a href="' + sandboxUrl + '" target="_blank" style="display:inline-block;background:#FFA629;color:#fff;padding:8px 14px;border-radius:6px;text-decoration:none;font-weight:bold;font-size:13px;">Open sandbox ↗</a>';
+  box.appendChild(banner);
+
   questions.forEach(q => {
     const done = status[q.id] === 'submitted';
     const div = document.createElement('div');
@@ -130,7 +142,8 @@ function renderQuestionList(status) {
     div.innerHTML =
       '<span class="badge' + (done ? ' done' : '') + '">' + (done ? 'Submitted' : 'Available') + '</span>' +
       '<p style="font-weight:bold;margin:8px 0 4px;">' + q.title + '</p>' +
-      '<p class="muted" style="margin:0 0 8px;">' + q.instructions + '</p>';
+      '<p class="muted" style="margin:0 0 8px;">' + q.instructions + '</p>' +
+      '<p style="margin:0 0 8px;font-size:12px;color:#a05a00;font-weight:bold;">⏱ Time limit: ' + q.timeLimitMin + ' min · Only 1 attempt — take a breath, this is meant to be straightforward. Trust what you know.</p>';
     if (!done) {
       const btn = document.createElement('button');
       btn.textContent = 'Start question';
@@ -146,7 +159,9 @@ function renderQuestionList(status) {
 // ---- Step 3: Recording ----
 function startQuestion(q) {
   currentQuestion = q;
-  document.getElementById('qInstructions').textContent = q.title + ' — ' + q.instructions;
+  document.getElementById('qInstructions').innerHTML =
+    '<strong>' + q.title + '</strong> — ' + q.instructions +
+    '<br><span style="color:#a05a00;font-weight:bold;">⏱ Time limit: ' + q.timeLimitMin + ' min · Only 1 attempt — trust what you know.</span>';
   document.getElementById('btnSubmit').disabled = true;
   document.getElementById('btnStart').disabled = false;
   document.getElementById('btnStop').disabled = true;
@@ -198,8 +213,12 @@ document.getElementById('btnStart').onclick = async () => {
   previewEl.srcObject = mixedStream;
 
   chunks = [];
-  const mime = MediaRecorder.isTypeSupported('video/webm;codecs=vp9,opus') ? 'video/webm;codecs=vp9,opus' : 'video/webm';
-  recorder = new MediaRecorder(mixedStream, { mimeType: mime });
+  const mp4Type = 'video/mp4;codecs=avc1.42E01E,mp4a.40.2';
+  const webmType = 'video/webm;codecs=vp9,opus';
+  const recordedMime = MediaRecorder.isTypeSupported(mp4Type) ? mp4Type
+                      : (MediaRecorder.isTypeSupported(webmType) ? webmType : 'video/webm');
+  window.__recordedMime = recordedMime; // read by the submit handler
+  recorder = new MediaRecorder(mixedStream, { mimeType: recordedMime });
   recorder.ondataavailable = e => { if (e.data.size > 0) chunks.push(e.data); };
   recorder.start();
 
@@ -236,7 +255,8 @@ document.getElementById('btnSubmit').onclick = () => {
   document.getElementById('btnSubmit').disabled = true;
   document.getElementById('btnSubmit').textContent = 'Uploading...';
   setTimeout(() => {
-    const blob = new Blob(chunks, { type: 'video/webm' });
+    const finalMime = window.__recordedMime || 'video/webm';
+    const blob = new Blob(chunks, { type: finalMime });
     const reader = new FileReader();
     reader.onload = () => {
       const base64 = reader.result.split(',')[1];
@@ -244,7 +264,7 @@ document.getElementById('btnSubmit').onclick = () => {
         name: candidateName,
         email: candidateEmail,
         questionId: currentQuestion.id,
-        mimeType: 'video/webm',
+        mimeType: finalMime,
         videoBase64: base64
       })
       .then(onSubmitDone)
