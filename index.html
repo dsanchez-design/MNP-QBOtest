@@ -55,17 +55,20 @@
     <button id="btnCancel" class="secondary">Back to questions</button>
   </div>
 
-  <!-- STEP 4: Done -->
-  <div id="stepDone" class="hidden">
-    <p>All questions submitted. Thank you!</p>
-  </div>
+  <!-- STEP 4: Done (filled in dynamically by renderDoneScreen) -->
+  <div id="stepDone" class="hidden"></div>
 
 <script>
 // ============================================================
 // FILL THIS IN after you deploy the Apps Script backend:
 // Deploy → Manage deployments → copy the "Web app" URL.
 // ============================================================
-const WEB_APP_URL = 'https://script.google.com/macros/s/AKfycbxzlVq5RY4g2I3d7MlkikEYOwirNrWarzi1C__HiTTy2Z4204D5RypqEwIR4tOTfz8/exec';
+const WEB_APP_URL = 'PASTE_YOUR_APPS_SCRIPT_WEB_APP_URL_HERE';
+// Where the candidate is told to send their completion confirmation:
+const ADMIN_EMAIL = 'PASTE_YOUR_EMAIL_HERE';
+
+let sessionStart = null;
+let sessionEnd = null;
 
 let candidateName = '';
 let candidateEmail = '';
@@ -99,6 +102,7 @@ document.getElementById('btnRegister').onclick = () => {
   candidateName = document.getElementById('name').value.trim();
   candidateEmail = document.getElementById('email').value.trim();
   if (!candidateName || !candidateEmail) { alert('Please fill in both fields.'); return; }
+  sessionStart = new Date();
   document.getElementById('subtitle').textContent = 'Loading your questions...';
 
   const stuckTimer = setTimeout(() => {
@@ -153,7 +157,45 @@ function renderQuestionList(status) {
     box.appendChild(div);
   });
   const allDone = questions.every(q => status[q.id] === 'submitted');
+  if (allDone) {
+    sessionEnd = new Date();
+    renderDoneScreen();
+  }
   showStep(allDone ? 'stepDone' : 'stepQuestions');
+}
+
+function fmt(d) {
+  if (!d) return '—';
+  return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) +
+    ' · ' + d.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
+}
+
+function renderDoneScreen() {
+  const box = document.getElementById('stepDone');
+  const subject = encodeURIComponent('Assessment completed — ' + candidateName);
+  const body = encodeURIComponent(
+    'Hi,\n\nI completed the bookkeeper assessment.\n\n' +
+    'Name: ' + candidateName + '\n' +
+    'Email: ' + candidateEmail + '\n' +
+    'Started: ' + fmt(sessionStart) + '\n' +
+    'Finished: ' + fmt(sessionEnd) + '\n\n' +
+    'Thank you!'
+  );
+  const mailtoLink = 'mailto:' + ADMIN_EMAIL + '?subject=' + subject + '&body=' + body;
+
+  box.innerHTML =
+    '<div class="card" style="text-align:center;">' +
+      '<p style="font-size:15px;font-weight:bold;color:#2b8a3e;margin:0 0 4px;">✓ All questions submitted</p>' +
+      '<p class="muted" style="margin:0 0 14px;">Thank you — here is your confirmation.</p>' +
+      '<div style="text-align:left;background:#F7F7F7;border-radius:8px;padding:12px 14px;font-size:13px;line-height:1.7;">' +
+        '<strong>Name:</strong> ' + candidateName + '<br>' +
+        '<strong>Email:</strong> ' + candidateEmail + '<br>' +
+        '<strong>Started:</strong> ' + fmt(sessionStart) + '<br>' +
+        '<strong>Finished:</strong> ' + fmt(sessionEnd) +
+      '</div>' +
+      '<a href="' + mailtoLink + '" style="display:block;margin-top:14px;background:#FFA629;color:#fff;padding:11px;border-radius:6px;text-decoration:none;font-weight:bold;font-size:14px;">Send confirmation email</a>' +
+      '<p class="muted" style="margin-top:10px;">Please send this confirmation so we know you have completed the assessment.</p>' +
+    '</div>';
 }
 
 // ---- Step 3: Recording ----
@@ -213,11 +255,9 @@ document.getElementById('btnStart').onclick = async () => {
   previewEl.srcObject = mixedStream;
 
   chunks = [];
-  const mp4Type = 'video/mp4;codecs=avc1.42E01E,mp4a.40.2';
   const webmType = 'video/webm;codecs=vp9,opus';
-  const recordedMime = MediaRecorder.isTypeSupported(mp4Type) ? mp4Type
-                      : (MediaRecorder.isTypeSupported(webmType) ? webmType : 'video/webm');
-  window.__recordedMime = recordedMime; // read by the submit handler
+  const recordedMime = MediaRecorder.isTypeSupported(webmType) ? webmType : 'video/webm';
+  window.__recordedMime = recordedMime;
   recorder = new MediaRecorder(mixedStream, { mimeType: recordedMime });
   recorder.ondataavailable = e => { if (e.data.size > 0) chunks.push(e.data); };
   recorder.start();
@@ -251,17 +291,28 @@ function stopAllTracks() {
   [screenStream, camStream].forEach(s => { if (s) s.getTracks().forEach(t => t.stop()); });
 }
 
-document.getElementById('btnSubmit').onclick = () => {
-  document.getElementById('btnSubmit').disabled = true;
-  document.getElementById('btnSubmit').textContent = 'Uploading...';
-  setTimeout(() => {
-    const finalMime = window.__recordedMime || 'video/webm';
-    const blob = new Blob(chunks, { type: finalMime });
+function blobToBase64(blob) {
+  return new Promise((resolve, reject) => {
     const reader = new FileReader();
     reader.onload = () => {
       const marker = 'base64,';
       const idx = reader.result.indexOf(marker);
-      const base64 = reader.result.substring(idx + marker.length);
+      resolve(reader.result.substring(idx + marker.length));
+    };
+    reader.onerror = reject;
+    reader.readAsDataURL(blob);
+  });
+}
+
+document.getElementById('btnSubmit').onclick = () => {
+  document.getElementById('btnSubmit').disabled = true;
+  document.getElementById('btnSubmit').textContent = 'Uploading...';
+  setTimeout(async () => {
+    try {
+      const finalMime = window.__recordedMime || 'video/webm';
+      const blob = new Blob(chunks, { type: finalMime });
+      const base64 = await blobToBase64(blob);
+
       apiPost({
         name: candidateName,
         email: candidateEmail,
@@ -271,15 +322,28 @@ document.getElementById('btnSubmit').onclick = () => {
       })
       .then(onSubmitDone)
       .catch(onSubmitError);
-    };
-    reader.readAsDataURL(blob);
+    } catch (err) {
+      onSubmitError(err);
+    }
   }, 200);
 };
 
 function onSubmitDone(res) {
   document.getElementById('btnSubmit').textContent = 'Submit this recording';
   if (!res.ok) { alert('Could not submit: ' + res.error); document.getElementById('btnSubmit').disabled = false; return; }
-  apiGet({ action: 'status', email: candidateEmail }).then(r => renderQuestionList(r.status));
+
+  // Clear, unmissable confirmation before we auto-return — no click required.
+  document.getElementById('qInstructions').innerHTML =
+    '<span style="color:#2b8a3e;font-weight:bold;">✓ Recording submitted successfully.</span><br>Taking you back to your questions...';
+  document.getElementById('btnStart').disabled = true;
+  document.getElementById('btnStop').disabled = true;
+  document.getElementById('btnSubmit').disabled = true;
+  document.getElementById('btnCancel').disabled = true;
+
+  setTimeout(() => {
+    document.getElementById('btnCancel').disabled = false;
+    apiGet({ action: 'status', email: candidateEmail }).then(r => renderQuestionList(r.status));
+  }, 1600);
 }
 
 function onSubmitError(err) {
