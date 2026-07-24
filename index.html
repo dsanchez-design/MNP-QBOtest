@@ -63,9 +63,9 @@
 // FILL THIS IN after you deploy the Apps Script backend:
 // Deploy → Manage deployments → copy the "Web app" URL.
 // ============================================================
-const WEB_APP_URL = 'https://script.google.com/macros/s/AKfycbxzlVq5RY4g2I3d7MlkikEYOwirNrWarzi1C__HiTTy2Z4204D5RypqEwIR4tOTfz8/exec';
+const WEB_APP_URL = 'PASTE_YOUR_APPS_SCRIPT_WEB_APP_URL_HERE';
 // Where the candidate is told to send their completion confirmation:
-const ADMIN_EMAIL = 'dsanchez@mightynonprofits.com';
+const ADMIN_EMAIL = 'PASTE_YOUR_EMAIL_HERE';
 
 let sessionStart = null;
 let sessionEnd = null;
@@ -135,9 +135,14 @@ function renderQuestionList(status) {
   banner.style.background = '#FFE1B8';
   banner.innerHTML =
     '<p style="font-weight:bold;margin:0 0 6px;">Your sandbox</p>' +
-    '<p class="muted" style="margin:0 0 8px;">Open this in a separate tab before you start recording each question.</p>' +
-    '<a href="' + sandboxUrl + '" target="_blank" style="display:inline-block;background:#FFA629;color:#fff;padding:8px 14px;border-radius:6px;text-decoration:none;font-weight:bold;font-size:13px;">Open sandbox ↗</a>';
+    '<p class="muted" style="margin:0 0 8px;">This opens in a separate window — drag it to one side of your screen, and keep this assessment window visible on the other side. Don\'t switch tabs while recording, or it will freeze.</p>' +
+    '<button id="btnOpenSandbox" type="button" style="background:#FFA629;">Open sandbox ↗</button>';
   box.appendChild(banner);
+  document.getElementById('btnOpenSandbox').onclick = () => {
+    const w = Math.round(window.screen.width * 0.55);
+    const h = Math.round(window.screen.height * 0.85);
+    window.open(sandboxUrl, 'mnp_sandbox', 'width=' + w + ',height=' + h + ',left=' + (window.screen.width - w) + ',top=40');
+  };
 
   questions.forEach(q => {
     const done = status[q.id] === 'submitted';
@@ -203,7 +208,8 @@ function startQuestion(q) {
   currentQuestion = q;
   document.getElementById('qInstructions').innerHTML =
     '<strong>' + q.title + '</strong> — ' + q.instructions +
-    '<br><span style="color:#a05a00;font-weight:bold;">⏱ Time limit: ' + q.timeLimitMin + ' min · Only 1 attempt — trust what you know.</span>';
+    '<br><span style="color:#a05a00;font-weight:bold;">⏱ Time limit: ' + q.timeLimitMin + ' min · Only 1 attempt — trust what you know.</span>' +
+    '<br><span style="color:#a05a00;">Keep the sandbox window visible next to this one — don\'t switch tabs, or the recording will freeze.</span>';
   document.getElementById('btnSubmit').disabled = true;
   document.getElementById('btnStart').disabled = false;
   document.getElementById('btnStop').disabled = true;
