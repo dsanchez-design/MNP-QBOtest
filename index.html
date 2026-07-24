@@ -281,9 +281,42 @@ document.getElementById('btnStart').onclick = async () => {
   }, 1000);
 
   screenStream.getVideoTracks()[0].onended = () => document.getElementById('btnStop').click();
+
+  // Safety net: if this tab gets hidden while recording (e.g. the candidate
+  // switched tabs instead of using a separate window), the recording would
+  // silently freeze. Instead, cancel it immediately, discard it, and explain
+  // what happened — this does NOT use up their one attempt.
+  document.addEventListener('visibilitychange', handleHiddenDuringRecording);
 };
 
+function handleHiddenDuringRecording() {
+  if (document.hidden && recorder && recorder.state === 'recording') {
+    if (recorder) recorder.stop();
+    cancelAnimationFrame(drawLoop);
+    clearInterval(timerInt);
+    stopAllTracks();
+    chunks = [];
+    document.removeEventListener('visibilitychange', handleHiddenDuringRecording);
+
+    document.getElementById('recDot').style.display = 'none';
+    document.getElementById('timer').style.display = 'none';
+    document.getElementById('btnStart').disabled = false;
+    document.getElementById('btnStop').disabled = true;
+    document.getElementById('btnSubmit').disabled = true;
+
+    // Runs when the candidate comes back to this tab.
+    const notify = () => {
+      if (!document.hidden) {
+        document.removeEventListener('visibilitychange', notify);
+        alert('Recording cancelled: this tab was hidden (you switched away from it). This attempt was NOT used — you can try again.\n\nTip: open the sandbox as a separate window and keep both windows visible side by side, instead of switching tabs.');
+      }
+    };
+    document.addEventListener('visibilitychange', notify);
+  }
+}
+
 document.getElementById('btnStop').onclick = () => {
+  document.removeEventListener('visibilitychange', handleHiddenDuringRecording);
   if (recorder && recorder.state !== 'inactive') recorder.stop();
   cancelAnimationFrame(drawLoop);
   clearInterval(timerInt);
