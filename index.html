@@ -63,9 +63,9 @@
 // FILL THIS IN after you deploy the Apps Script backend:
 // Deploy → Manage deployments → copy the "Web app" URL.
 // ============================================================
-const WEB_APP_URL = 'https://script.google.com/macros/s/AKfycbxzlVq5RY4g2I3d7MlkikEYOwirNrWarzi1C__HiTTy2Z4204D5RypqEwIR4tOTfz8/exec';
+const WEB_APP_URL = 'PASTE_YOUR_APPS_SCRIPT_WEB_APP_URL_HERE';
 // Where the candidate is told to send their completion confirmation:
-const ADMIN_EMAIL = 'dsanchez@mightynonprofits.com';
+const ADMIN_EMAIL = 'PASTE_YOUR_EMAIL_HERE';
 
 let sessionStart = null;
 let sessionEnd = null;
@@ -136,6 +136,7 @@ function renderQuestionList(status) {
   banner.innerHTML =
     '<p style="font-weight:bold;margin:0 0 6px;">Your sandbox</p>' +
     '<p class="muted" style="margin:0 0 8px;">This opens in a separate window — drag it to one side of your screen, and keep this assessment window visible on the other side. Don\'t switch tabs while recording, or it will freeze.</p>' +
+    '<a href="instructions.html" target="_blank" style="display:inline-block;font-size:12.5px;color:#a05a00;margin-bottom:8px;">📄 See setup instructions with a picture ↗</a><br>' +
     '<button id="btnOpenSandbox" type="button" style="background:#FFA629;">Open sandbox ↗</button>';
   box.appendChild(banner);
   document.getElementById('btnOpenSandbox').onclick = () => {
